@@ -9,7 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 import { useLocation } from "wouter";
-import { ArrowLeft, Plus, Trash2, Loader2, BookOpen, Sparkles, Upload } from "lucide-react";
+import { ArrowLeft, Plus, Trash2, Loader2, BookOpen, Sparkles, Upload, Search, X } from "lucide-react";
 import { useState, useRef } from "react";
 import { toast } from "sonner";
 
@@ -58,6 +58,19 @@ export default function Memories() {
   const [importOpen, setImportOpen] = useState(false);
   const [importText, setImportText] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
+  // Search & filter state
+  const [searchQuery, setSearchQuery] = useState("");
+  const [filterCategory, setFilterCategory] = useState("all");
+
+  // Client-side filtered memories
+  const filteredMemories = (memories ?? []).filter((m) => {
+    const matchesSearch = !searchQuery.trim() ||
+      (m.title ?? "").toLowerCase().includes(searchQuery.toLowerCase()) ||
+      m.content.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (m.emotionalTone ?? "").toLowerCase().includes(searchQuery.toLowerCase());
+    const matchesCategory = filterCategory === "all" || m.category === filterCategory;
+    return matchesSearch && matchesCategory;
+  });
   const [title, setTitle] = useState("");
   const [content, setContent] = useState("");
   const [category, setCategory] = useState<CategoryValue>("other");
@@ -195,16 +208,68 @@ export default function Memories() {
       </nav>
 
       <div className="container py-8 max-w-3xl mx-auto">
-        <p className="text-muted-foreground mb-8">
-          Each memory adds depth to your mind entity. The stories you tell here become part of how your digital mind 
+        <p className="text-muted-foreground mb-6">
+          Each memory adds depth to your mind entity. The stories you tell here become part of how your digital mind
           thinks, advises, and comforts your loved ones.
         </p>
+
+        {/* Search & Filter */}
+        {memories && memories.length > 0 && (
+          <div className="space-y-3 mb-6">
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input
+                placeholder="Search memories..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="pl-9 bg-background/50"
+              />
+              {searchQuery && (
+                <button onClick={() => setSearchQuery("")} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
+                  <X className="h-4 w-4" />
+                </button>
+              )}
+            </div>
+            <div className="flex gap-2 flex-wrap">
+              {["all", ...CATEGORIES.map(c => c.value)].map((cat) => {
+                const label = cat === "all" ? "All" : CATEGORIES.find(c => c.value === cat)?.label ?? cat;
+                return (
+                  <button
+                    key={cat}
+                    onClick={() => setFilterCategory(cat)}
+                    className={`text-xs px-3 py-1 rounded-full border transition-all ${
+                      filterCategory === cat
+                        ? "bg-primary text-primary-foreground border-primary"
+                        : "border-border/50 text-muted-foreground hover:border-border"
+                    }`}
+                  >
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
+            {(searchQuery || filterCategory !== "all") && (
+              <p className="text-xs text-muted-foreground">
+                Showing {filteredMemories.length} of {memories.length} memories
+                {searchQuery && <> matching &ldquo;{searchQuery}&rdquo;</>}
+                {filterCategory !== "all" && <> in {CATEGORIES.find(c => c.value === filterCategory)?.label}</>}
+              </p>
+            )}
+          </div>
+        )}
 
         {isLoading ? (
           <div className="flex justify-center py-12"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>
         ) : memories && memories.length > 0 ? (
           <div className="space-y-4">
-            {memories.map((memory) => (
+            {filteredMemories.length === 0 && (
+              <div className="text-center py-12 text-muted-foreground">
+                <Search className="h-8 w-8 mx-auto mb-3 opacity-30" />
+                <p>No memories match your search.</p>
+                <button onClick={() => { setSearchQuery(""); setFilterCategory("all"); }} className="text-primary text-sm mt-2 hover:underline">Clear filters</button>
+              </div>
+            )}
+            {filteredMemories.map((memory) => (
               <Card key={memory.id} className="bg-card/50 border-border/50 group">
                 <CardContent className="pt-6">
                   <div className="flex items-start justify-between gap-4">

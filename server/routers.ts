@@ -3,11 +3,12 @@ import { TRPCError } from "@trpc/server";
 import { z } from "zod/v4";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { ENV } from "./_core/env";
+import { notifyOwner } from "./_core/notification";
 import { systemRouter } from "./_core/systemRouter";
 import { protectedProcedure, publicProcedure, router } from "./_core/trpc";
 import * as db from "./db";
 
-// ─── LLM helper (inline, using Forge API) ────────────────
+// ─── LLM helper ──────────────────────────────────────────
 async function invokeLLM(messages: { role: string; content: string }[], systemPrompt?: string) {
   const apiUrl = ENV.forgeApiUrl
     ? `${ENV.forgeApiUrl.replace(/\/$/, "")}/v1/chat/completions`
@@ -87,7 +88,50 @@ export const appRouter = router({
       const assessments = await db.getAssessments(ctx.user.id);
       const assessmentTypes = assessments.map((a) => a.assessmentType);
       const completeness = db.calculateCompleteness(profile, memories.length, assessmentTypes);
-      return { completeness };
+
+      // Build tips for what's missing
+      const tips: string[] = [];
+      if (!profile) {
+        tips.push("Start your profile with your name and life story");
+      } else {
+        if (!profile.displayName) tips.push("Add your display name");
+        if (!profile.lifeStory) tips.push("Write your life story");
+        if (!profile.coreValues) tips.push("Share your core values");
+        if (!profile.communicationStyle) tips.push("Describe your communication style");
+        if (!profile.importantPeople) tips.push("List the important people in your life");
+        if (!profile.legacyMessage) tips.push("Leave a legacy message for loved ones");
+      }
+      if (memories.length < 5) tips.push(`Add ${5 - memories.length} more memories (you have ${memories.length})`);
+      if (!assessmentTypes.includes("big_five")) tips.push("Complete the Big Five personality assessment");
+      if (!assessmentTypes.includes("cognitive")) tips.push("Complete the cognitive style assessment");
+
+      return { completeness, tips: tips.slice(0, 5) };
+    }),
+
+    /** Dashboard stats: memory count, assessment count, entity status */
+    stats: protectedProcedure.query(async ({ ctx }) => {
+      const [profile, memoriesList, assessmentsList, entity] = await Promise.all([
+        db.getMindProfile(ctx.user.id),
+        db.getMemories(ctx.user.id),
+        db.getAssessments(ctx.user.id),
+        db.getMindEntity(ctx.user.id),
+      ]);
+      const completeness = db.calculateCompleteness(
+        profile,
+        memoriesList.length,
+        assessmentsList.map((a) => a.assessmentType)
+      );
+      return {
+        memoryCount: memoriesList.length,
+        assessmentCount: assessmentsList.length,
+        entityStatus: entity?.status ?? null,
+        entityName: entity?.entityName ?? null,
+        entitySlug: entity?.slug ?? null,
+        completeness,
+        isPublic: entity?.isPublic ?? false,
+        inCollective: entity?.inCollective ?? false,
+        totalConversations: entity?.totalConversations ?? 0,
+      };
     }),
   }),
 
@@ -97,6 +141,17 @@ export const appRouter = router({
       return db.getMemories(ctx.user.id);
     }),
 
+    search: protectedProcedure
+      .input(
+        z.object({
+          query: z.string().default(""),
+          category: z.string().optional(),
+        })
+      )
+      .query(async ({ ctx, input }) => {
+        return db.searchMemories(ctx.user.id, input.query, input.category);
+      }),
+
     add: protectedProcedure
       .input(
         z.object({
@@ -104,19 +159,8 @@ export const appRouter = router({
           content: z.string(),
           category: z
             .enum([
-              "childhood",
-              "family",
-              "career",
-              "relationship",
-              "achievement",
-              "challenge",
-              "lesson",
-              "tradition",
-              "travel",
-              "friendship",
-              "loss",
-              "joy",
-              "other",
+              "childhood", "family", "career", "relationship", "achievement",
+              "challenge", "lesson", "tradition", "travel", "friendship", "loss", "joy", "other",
             ])
             .optional(),
           emotionalTone: z.string().optional(),
@@ -135,13 +179,8 @@ export const appRouter = router({
         return { success: true };
       }),
 
-    // ─── Import from text / document ──────────────────
     importFromText: protectedProcedure
-      .input(
-        z.object({
-          text: z.string().min(10).max(50000),
-        })
-      )
+      .input(z.object({ text: z.string().min(10).max(50000) }))
       .mutation(async ({ ctx, input }) => {
         const extractionPrompt = `You are an expert at extracting personal memories and life stories from text.
 
@@ -166,32 +205,23 @@ Return a JSON array of memory objects. Each object must have:
   "importance": number 1-10
 }
 
-Extract between 1 and 20 memories. If the text is a single cohesive story, split it into meaningful segments. Return ONLY the JSON array, no other text.`;
+Extract between 1 and 20 memories. Return ONLY the JSON array, no other text.`;
 
         const responseText = await invokeLLM(
           [{ role: "user", content: extractionPrompt }],
           "You are an expert memory archivist. Extract structured memories from personal text. Respond only with a valid JSON array."
         );
 
-        // Parse the JSON response
         let extractedMemories: any[] = [];
         try {
           const jsonMatch = responseText.match(/\[[\s\S]*\]/);
-          if (jsonMatch) {
-            extractedMemories = JSON.parse(jsonMatch[0]);
-          }
+          if (jsonMatch) extractedMemories = JSON.parse(jsonMatch[0]);
         } catch (e) {
-          throw new TRPCError({
-            code: "INTERNAL_SERVER_ERROR",
-            message: "Failed to parse extracted memories from AI response",
-          });
+          throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Failed to parse extracted memories from AI response" });
         }
 
         if (!Array.isArray(extractedMemories) || extractedMemories.length === 0) {
-          throw new TRPCError({
-            code: "BAD_REQUEST",
-            message: "No memories could be extracted from the provided text",
-          });
+          throw new TRPCError({ code: "BAD_REQUEST", message: "No memories could be extracted from the provided text" });
         }
 
         const validCategories = [
@@ -199,7 +229,6 @@ Extract between 1 and 20 memories. If the text is a single cohesive story, split
           "challenge", "lesson", "tradition", "travel", "friendship", "loss", "joy", "other",
         ] as const;
 
-        // Save all extracted memories
         const saved: any[] = [];
         for (const mem of extractedMemories.slice(0, 20)) {
           if (!mem.content || typeof mem.content !== "string") continue;
@@ -211,9 +240,7 @@ Extract between 1 and 20 memories. If the text is a single cohesive story, split
             category,
             emotionalTone: mem.emotionalTone || null,
             yearApprox: typeof mem.yearApprox === "number" ? mem.yearApprox : null,
-            importance: typeof mem.importance === "number"
-              ? Math.min(10, Math.max(1, Math.round(mem.importance)))
-              : 5,
+            importance: typeof mem.importance === "number" ? Math.min(10, Math.max(1, Math.round(mem.importance))) : 5,
           });
           saved.push(mem);
         }
@@ -236,11 +263,7 @@ Extract between 1 and 20 memories. If the text is a single cohesive story, split
         })
       )
       .mutation(async ({ ctx, input }) => {
-        await db.saveAssessment({
-          userId: ctx.user.id,
-          assessmentType: input.assessmentType,
-          results: input.results,
-        });
+        await db.saveAssessment({ userId: ctx.user.id, assessmentType: input.assessmentType, results: input.results });
         return { success: true };
       }),
   }),
@@ -257,67 +280,103 @@ Extract between 1 and 20 memories. If the text is a single cohesive story, split
         return db.getMindEntityById(input.id);
       }),
 
+    /** Get a public entity by slug (for shareable /mind/:slug page) */
+    getBySlug: publicProcedure
+      .input(z.object({ slug: z.string() }))
+      .query(async ({ input }) => {
+        const entity = await db.getMindEntityBySlug(input.slug);
+        if (!entity) throw new TRPCError({ code: "NOT_FOUND", message: "Mind not found" });
+        // Only expose public entities or those accessed via slug (owner controls isPublic)
+        return {
+          id: entity.id,
+          entityName: entity.entityName,
+          entityBio: entity.entityBio,
+          status: entity.status,
+          isPublic: entity.isPublic,
+          inCollective: entity.inCollective,
+          totalConversations: entity.totalConversations,
+          slug: entity.slug,
+          createdAt: entity.createdAt,
+        };
+      }),
+
+    /** Get entity by private share token (allows access even if not public) */
+    getByShareToken: publicProcedure
+      .input(z.object({ token: z.string() }))
+      .query(async ({ input }) => {
+        const entity = await db.getMindEntityByShareToken(input.token);
+        if (!entity) throw new TRPCError({ code: "NOT_FOUND", message: "Share link not found or expired" });
+        return {
+          id: entity.id,
+          entityName: entity.entityName,
+          entityBio: entity.entityBio,
+          status: entity.status,
+          slug: entity.slug,
+          shareToken: entity.shareToken,
+          totalConversations: entity.totalConversations,
+          createdAt: entity.createdAt,
+        };
+      }),
+
+    /** Generate or retrieve the shareable link for the current user's entity */
+    generateShareLink: protectedProcedure.mutation(async ({ ctx }) => {
+      const entity = await db.getMindEntity(ctx.user.id);
+      if (!entity) throw new TRPCError({ code: "NOT_FOUND", message: "No mind entity found. Synthesize your mind first." });
+      if (entity.status !== "active") throw new TRPCError({ code: "BAD_REQUEST", message: "Your mind entity must be active before sharing." });
+
+      // Generate slug and token if they don't exist
+      const updates: any = {};
+      if (!entity.slug) {
+        updates.slug = db.generateSlug(entity.entityName || "mind");
+      }
+      if (!entity.shareToken) {
+        updates.shareToken = db.generateShareToken();
+      }
+
+      if (Object.keys(updates).length > 0) {
+        await db.upsertMindEntity(ctx.user.id, updates);
+      }
+
+      const slug = entity.slug || updates.slug;
+      const shareToken = entity.shareToken || updates.shareToken;
+
+      return {
+        slug,
+        shareToken,
+        slugUrl: `/mind/${slug}`,
+        tokenUrl: `/mind/token/${shareToken}`,
+      };
+    }),
+
     synthesize: protectedProcedure.mutation(async ({ ctx }) => {
       const profile = await db.getMindProfile(ctx.user.id);
-      const memories = await db.getMemories(ctx.user.id);
-      const assessments = await db.getAssessments(ctx.user.id);
+      const memoriesList = await db.getMemories(ctx.user.id);
+      const assessmentsList = await db.getAssessments(ctx.user.id);
       const completeness = db.calculateCompleteness(
         profile,
-        memories.length,
-        assessments.map((a) => a.assessmentType)
+        memoriesList.length,
+        assessmentsList.map((a) => a.assessmentType)
       );
 
       if (completeness < 20) {
-        throw new TRPCError({
-          code: "BAD_REQUEST",
-          message: "Complete at least 20% of your profile before synthesizing",
-        });
+        throw new TRPCError({ code: "BAD_REQUEST", message: "Complete at least 20% of your profile before synthesizing" });
       }
 
       const profileSummary = profile
-        ? `
-Name: ${profile.displayName || "Unknown"}
-Birth Year: ${profile.birthYear || "Unknown"}
-Location: ${profile.location || "Unknown"}
-Occupation: ${profile.occupation || "Unknown"}
-Life Story: ${profile.lifeStory || "Not provided"}
-Core Values: ${profile.coreValues || "Not provided"}
-Beliefs: ${profile.beliefs || "Not provided"}
-Likes & Joys: ${profile.likesAndJoys || "Not provided"}
-Dislikes & Fears: ${profile.dislikesAndFears || "Not provided"}
-Communication Style: ${profile.communicationStyle || "Not provided"}
-Humor Style: ${profile.humorStyle || "Not provided"}
-Important People: ${profile.importantPeople || "Not provided"}
-Legacy Message: ${profile.legacyMessage || "Not provided"}
-Estate Wishes: ${profile.estateWishes || "Not provided"}
-`.trim()
+        ? `Name: ${profile.displayName || "Unknown"}\nBirth Year: ${profile.birthYear || "Unknown"}\nLocation: ${profile.location || "Unknown"}\nOccupation: ${profile.occupation || "Unknown"}\nLife Story: ${profile.lifeStory || "Not provided"}\nCore Values: ${profile.coreValues || "Not provided"}\nBeliefs: ${profile.beliefs || "Not provided"}\nLikes & Joys: ${profile.likesAndJoys || "Not provided"}\nDislikes & Fears: ${profile.dislikesAndFears || "Not provided"}\nCommunication Style: ${profile.communicationStyle || "Not provided"}\nHumor Style: ${profile.humorStyle || "Not provided"}\nImportant People: ${profile.importantPeople || "Not provided"}\nLegacy Message: ${profile.legacyMessage || "Not provided"}\nEstate Wishes: ${profile.estateWishes || "Not provided"}`
         : "No profile data available";
 
-      const memoriesSummary =
-        memories.length > 0
-          ? memories
-              .slice(0, 20)
-              .map((m) => `[${m.category}] ${m.title || ""}: ${m.content}`)
-              .join("\n")
-          : "No memories recorded";
+      const memoriesSummary = memoriesList.length > 0
+        ? memoriesList.slice(0, 20).map((m) => `[${m.category}] ${m.title || ""}: ${m.content}`).join("\n")
+        : "No memories recorded";
 
-      const assessmentSummary =
-        assessments.length > 0
-          ? assessments
-              .map((a) => `${a.assessmentType}: ${JSON.stringify(a.results)}`)
-              .join("\n")
-          : "No assessments completed";
+      const assessmentSummary = assessmentsList.length > 0
+        ? assessmentsList.map((a) => `${a.assessmentType}: ${JSON.stringify(a.results)}`).join("\n")
+        : "No assessments completed";
 
       const synthesisPrompt = `You are synthesizing a digital mind entity from personal data. Create a rich, nuanced personality synthesis that captures this person's essence.
 
-PROFILE:
-${profileSummary}
-
-MEMORIES:
-${memoriesSummary}
-
-ASSESSMENTS:
-${assessmentSummary}
+PROFILE:\n${profileSummary}\n\nMEMORIES:\n${memoriesSummary}\n\nASSESSMENTS:\n${assessmentSummary}
 
 Create:
 1. A personality synthesis (2-3 paragraphs describing who this person is, their values, how they think and communicate)
@@ -335,11 +394,8 @@ The entityBio should be 1-2 sentences describing this mind entity for public dis
       let synthesisData: any = {};
       try {
         const jsonMatch = responseText.match(/\{[\s\S]*\}/);
-        if (jsonMatch) {
-          synthesisData = JSON.parse(jsonMatch[0]);
-        }
+        if (jsonMatch) synthesisData = JSON.parse(jsonMatch[0]);
       } catch (e) {
-        console.error("Failed to parse synthesis response:", e);
         synthesisData = {
           personalitySynthesis: responseText,
           systemPrompt: `You are ${profile?.displayName || "this person"}. Respond as them based on their profile and memories.`,
@@ -348,14 +404,23 @@ The entityBio should be 1-2 sentences describing this mind entity for public dis
         };
       }
 
-      const entity = await db.upsertMindEntity(ctx.user.id, {
+      // Auto-generate slug on synthesis
+      const existingEntity = await db.getMindEntity(ctx.user.id);
+      const slugUpdates: any = {
         personalitySynthesis: synthesisData.personalitySynthesis,
         systemPrompt: synthesisData.systemPrompt,
         entityName: synthesisData.entityName || profile?.displayName,
         entityBio: synthesisData.entityBio,
         status: "active",
-      });
+      };
+      if (!existingEntity?.slug) {
+        slugUpdates.slug = db.generateSlug(synthesisData.entityName || profile?.displayName || "mind");
+      }
+      if (!existingEntity?.shareToken) {
+        slugUpdates.shareToken = db.generateShareToken();
+      }
 
+      const entity = await db.upsertMindEntity(ctx.user.id, slugUpdates);
       return entity;
     }),
 
@@ -399,12 +464,7 @@ The entityBio should be 1-2 sentences describing this mind entity for public dis
       }),
 
     sendMessage: publicProcedure
-      .input(
-        z.object({
-          conversationId: z.number(),
-          content: z.string(),
-        })
-      )
+      .input(z.object({ conversationId: z.number(), content: z.string() }))
       .mutation(async ({ input }) => {
         const conv = await db.getConversation(input.conversationId);
         if (!conv) throw new TRPCError({ code: "NOT_FOUND", message: "Conversation not found" });
@@ -412,11 +472,7 @@ The entityBio should be 1-2 sentences describing this mind entity for public dis
         const entity = await db.getMindEntityById(conv.entityId);
         if (!entity) throw new TRPCError({ code: "NOT_FOUND", message: "Mind entity not found" });
 
-        await db.addChatMessage({
-          conversationId: input.conversationId,
-          role: "user",
-          content: input.content,
-        });
+        await db.addChatMessage({ conversationId: input.conversationId, role: "user", content: input.content });
 
         const history = await db.getChatMessages(input.conversationId);
         const messages = history
@@ -424,42 +480,65 @@ The entityBio should be 1-2 sentences describing this mind entity for public dis
           .map((m) => ({ role: m.role as "user" | "assistant", content: m.content }));
 
         const modeContext =
-          conv.mode === "comfort"
-            ? "The visitor is seeking emotional comfort. Be warm, empathetic, and supportive."
-            : conv.mode === "advice"
-            ? "The visitor is seeking advice. Draw on your life experiences and values."
-            : conv.mode === "estate"
-            ? "The visitor wants to understand your estate wishes and final thoughts. Be clear and thoughtful."
-            : "Have a natural conversation as yourself.";
+          conv.mode === "comfort" ? "The visitor is seeking emotional comfort. Be warm, empathetic, and supportive."
+          : conv.mode === "advice" ? "The visitor is seeking advice. Draw on your life experiences and values."
+          : conv.mode === "estate" ? "The visitor wants to understand your estate wishes and final thoughts. Be clear and thoughtful."
+          : "Have a natural conversation as yourself.";
 
-        const systemPrompt =
-          entity.systemPrompt ||
-          `You are ${entity.entityName || "this person"}. ${entity.personalitySynthesis || ""} Respond authentically as this person.`;
+        const systemPrompt = entity.systemPrompt || `You are ${entity.entityName || "this person"}. ${entity.personalitySynthesis || ""} Respond authentically as this person.`;
+        const aiResponse = await invokeLLM(messages, `${systemPrompt}\n\nContext: ${modeContext}`);
 
-        const fullSystemPrompt = `${systemPrompt}\n\nContext: ${modeContext}`;
-        const aiResponse = await invokeLLM(messages, fullSystemPrompt);
+        await db.addChatMessage({ conversationId: input.conversationId, role: "assistant", content: aiResponse });
 
-        await db.addChatMessage({
-          conversationId: input.conversationId,
-          role: "assistant",
-          content: aiResponse,
-        });
-
-        const db2 = await db.getDb();
-        if (db2) {
+        const dbConn = await db.getDb();
+        if (dbConn) {
           const { mindEntities } = await import("../drizzle/schema");
           const { eq, sql } = await import("drizzle-orm");
-          await db2
-            .update(mindEntities)
-            .set({
-              totalConversations: sql`totalConversations + 1`,
-              lastContactedAt: new Date(),
-            })
+          await dbConn.update(mindEntities)
+            .set({ totalConversations: sql`totalConversations + 1`, lastContactedAt: new Date() })
             .where(eq(mindEntities.id, entity.id));
         }
 
         return { content: aiResponse };
       }),
+
+    getHistory: publicProcedure
+      .input(z.object({ conversationId: z.number() }))
+      .query(async ({ input }) => {
+        return db.getChatMessages(input.conversationId);
+      }),
+  }),
+
+  // ─── Notifications ────────────────────────────────────
+  notifications: router({
+    /** Send the owner a weekly memory prompt notification */
+    sendWeeklyMemoryPrompt: protectedProcedure.mutation(async ({ ctx }) => {
+      const memories = await db.getMemories(ctx.user.id);
+      const profile = await db.getMindProfile(ctx.user.id);
+      const name = profile?.displayName || ctx.user.name || "there";
+
+      const prompts = [
+        "What's a childhood memory involving food or a family meal?",
+        "Describe a moment when you felt truly proud of yourself.",
+        "What's a place that holds special meaning to you, and why?",
+        "Tell the story of how you met someone important in your life.",
+        "What's a challenge you overcame that shaped who you are?",
+        "Describe a tradition or ritual that was important to your family.",
+        "What's a piece of advice you'd give your younger self?",
+        "Tell a story about a time you laughed until it hurt.",
+        "What's a moment of unexpected kindness you experienced?",
+        "Describe the home you grew up in — what do you remember most?",
+      ];
+
+      const randomPrompt = prompts[Math.floor(Math.random() * prompts.length)];
+
+      await notifyOwner({
+        title: `MindOcean: Time to add a memory`,
+        content: `Hi ${name}! You have ${memories.length} memories recorded. Here's a prompt to inspire your next one:\n\n"${randomPrompt}"\n\nVisit your Memories page to record it.`,
+      });
+
+      return { success: true, prompt: randomPrompt };
+    }),
   }),
 
   // ─── Collective (The Human Mind) ──────────────────────
@@ -475,8 +554,7 @@ The entityBio should be 1-2 sentences describing this mind entity for public dis
 
         if (collectiveMinds.length === 0) {
           return {
-            answer:
-              "The collective is empty. No minds have joined yet. Be the first to add your mind to The Human Mind.",
+            answer: "The collective is empty. No minds have joined yet. Be the first to add your mind to The Human Mind.",
             votes: { for: 0, against: 0, neutral: 0 },
             percentages: { for: 0, against: 0, neutral: 0 },
             perspectives: [],
@@ -555,6 +633,7 @@ Format as JSON: { "vote": "for"|"against"|"neutral", "perspective": "your 2-3 se
           bio: m.entityBio,
           inCollective: m.inCollective,
           conversations: m.totalConversations,
+          slug: m.slug,
         })),
         collectiveCount: collectiveMinds.length,
       };

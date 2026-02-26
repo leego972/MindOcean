@@ -7,7 +7,7 @@ import { getLoginUrl } from "@/const";
 import { useLocation } from "wouter";
 import {
   Brain, User, BookOpen, ClipboardCheck, Sparkles, MessageCircle,
-  Users, ChevronRight, ArrowLeft, Waves
+  Users, ChevronRight, ArrowLeft, Waves, Lightbulb, Share2
 } from "lucide-react";
 import { useEffect } from "react";
 
@@ -26,6 +26,7 @@ export default function Dashboard() {
   const { data: memories } = trpc.memories.list.useQuery(undefined, { enabled: isAuthenticated });
   const { data: assessments } = trpc.assessments.list.useQuery(undefined, { enabled: isAuthenticated });
   const { data: entity } = trpc.entity.get.useQuery(undefined, { enabled: isAuthenticated });
+  const { data: stats } = trpc.profile.stats.useQuery(undefined, { enabled: isAuthenticated });
 
   if (loading || !isAuthenticated) {
     return (
@@ -60,7 +61,7 @@ export default function Dashboard() {
             <span className="text-lg font-bold">My Mind</span>
           </div>
           <div className="flex items-center gap-3">
-            <span className="text-sm text-muted-foreground">Welcome, {user?.name || "Explorer"}</span>
+            <span className="text-sm text-muted-foreground hidden sm:block">Welcome, {user?.name || "Explorer"}</span>
             {entityActive && (
               <Button size="sm" variant="outline" onClick={() => setLocation(`/chat/${entity?.id}`)}>
                 <MessageCircle className="mr-1 h-4 w-4" /> Talk to My Mind
@@ -72,7 +73,7 @@ export default function Dashboard() {
 
       <div className="container py-8">
         {/* Completeness Overview */}
-        <Card className="mb-8 bg-card/50 border-border/50">
+        <Card className="mb-6 bg-card/50 border-border/50">
           <CardContent className="pt-6">
             <div className="flex items-center justify-between mb-4">
               <div>
@@ -89,8 +90,55 @@ export default function Dashboard() {
               </div>
             </div>
             <Progress value={completeness} className="h-3" />
+
+            {/* Completeness tips */}
+            {completenessData?.tips && completenessData.tips.length > 0 && (
+              <div className="mt-4 pt-4 border-t border-border/30">
+                <p className="text-xs font-medium text-muted-foreground mb-2 flex items-center gap-1">
+                  <Lightbulb className="h-3 w-3" /> Next steps to grow your mind:
+                </p>
+                <ul className="space-y-1.5">
+                  {completenessData.tips.map((tip, i) => (
+                    <li key={i} className="text-xs text-muted-foreground flex items-center gap-2">
+                      <span className="w-1.5 h-1.5 rounded-full bg-primary/50 shrink-0" />
+                      {tip}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
           </CardContent>
         </Card>
+
+        {/* Stats Row */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-8">
+          <div className="bg-card/40 border border-border/30 rounded-xl p-4 text-center">
+            <p className="text-2xl font-bold text-primary">{stats?.memoryCount ?? memoryCount}</p>
+            <p className="text-xs text-muted-foreground mt-1">Memories</p>
+          </div>
+          <div className="bg-card/40 border border-border/30 rounded-xl p-4 text-center">
+            <p className="text-2xl font-bold text-primary">{stats?.assessmentCount ?? assessmentTypes.length}</p>
+            <p className="text-xs text-muted-foreground mt-1">Assessments</p>
+          </div>
+          <div className="bg-card/40 border border-border/30 rounded-xl p-4 text-center">
+            <p className="text-2xl font-bold text-primary">{stats?.totalConversations ?? entity?.totalConversations ?? 0}</p>
+            <p className="text-xs text-muted-foreground mt-1">Conversations</p>
+          </div>
+          <div className="bg-card/40 border border-border/30 rounded-xl p-4 text-center">
+            {stats?.entitySlug ? (
+              <button
+                onClick={() => window.open(`/mind/${stats.entitySlug}`, "_blank")}
+                className="flex items-center justify-center gap-1 text-primary hover:underline w-full"
+              >
+                <Share2 className="h-4 w-4" />
+                <span className="text-sm font-medium">View</span>
+              </button>
+            ) : (
+              <p className="text-2xl font-bold text-muted-foreground/40">—</p>
+            )}
+            <p className="text-xs text-muted-foreground mt-1">Public Profile</p>
+          </div>
+        </div>
 
         {/* Action Cards Grid */}
         <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">

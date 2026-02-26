@@ -1,4 +1,4 @@
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, like, or } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import {
   Assessment,
@@ -203,6 +203,48 @@ export async function getPublicMinds(): Promise<MindEntity[]> {
     .orderBy(desc(mindEntities.createdAt));
 }
 
+export async function getMindEntityBySlug(slug: string): Promise<MindEntity | undefined> {
+  const db = await getDb();
+  if (!db) return undefined;
+  const result = await db
+    .select()
+    .from(mindEntities)
+    .where(eq(mindEntities.slug, slug))
+    .limit(1);
+  return result.length > 0 ? result[0] : undefined;
+}
+
+export async function getMindEntityByShareToken(token: string): Promise<MindEntity | undefined> {
+  const db = await getDb();
+  if (!db) return undefined;
+  const result = await db
+    .select()
+    .from(mindEntities)
+    .where(eq(mindEntities.shareToken, token))
+    .limit(1);
+  return result.length > 0 ? result[0] : undefined;
+}
+
+/** Generate a URL-safe slug from a name + random suffix */
+export function generateSlug(name: string): string {
+  const base = name
+    .toLowerCase()
+    .replace(/[^a-z0-9\s-]/g, "")
+    .replace(/\s+/g, "-")
+    .replace(/-+/g, "-")
+    .slice(0, 40)
+    .replace(/^-|-$/g, "");
+  const suffix = Math.random().toString(36).slice(2, 7);
+  return `${base || "mind"}-${suffix}`;
+}
+
+/** Generate a cryptographically-random share token */
+export function generateShareToken(): string {
+  return Array.from({ length: 32 }, () =>
+    Math.floor(Math.random() * 36).toString(36)
+  ).join("");
+}
+
 // ─── Conversations ───────────────────────────────────────
 export async function createConversation(data: InsertConversation): Promise<Conversation> {
   const db = await getDb();
@@ -235,6 +277,34 @@ export async function addChatMessage(data: InsertChatMessage) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
   return db.insert(chatMessages).values(data);
+}
+
+// ─── Memory Search ───────────────────────────────────────
+export async function searchMemories(
+  userId: number,
+  query: string,
+  category?: string
+): Promise<Memory[]> {
+  const db = await getDb();
+  if (!db) return [];
+  const conditions: any[] = [eq(memories.userId, userId)];
+  if (query.trim()) {
+    conditions.push(
+      or(
+        like(memories.content, `%${query}%`),
+        like(memories.title, `%${query}%`),
+        like(memories.emotionalTone, `%${query}%`)
+      )
+    );
+  }
+  if (category && category !== "all") {
+    conditions.push(eq(memories.category, category as any));
+  }
+  return db
+    .select()
+    .from(memories)
+    .where(and(...conditions))
+    .orderBy(desc(memories.importance), desc(memories.createdAt));
 }
 
 // ─── Profile Completeness Calculator ─────────────────────

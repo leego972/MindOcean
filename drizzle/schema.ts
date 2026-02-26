@@ -94,6 +94,10 @@ export const mindEntities = mysqlTable("mind_entities", {
   inCollective: boolean("inCollective").default(false),
   entityName: varchar("entityName", { length: 200 }),
   entityBio: text("entityBio"),
+  /** URL-friendly slug for shareable links, e.g. /mind/john-doe-a1b2 */
+  slug: varchar("slug", { length: 120 }).unique(),
+  /** Opaque token for private share links */
+  shareToken: varchar("shareToken", { length: 64 }).unique(),
   totalConversations: int("totalConversations").default(0),
   lastContactedAt: timestamp("lastContactedAt"),
   joinedCollectiveAt: timestamp("joinedCollectiveAt"),

@@ -16,7 +16,7 @@ import MindEntity from "./pages/MindEntity";
 import ChatWithMind from "./pages/ChatWithMind";
 import TheHumanMind from "./pages/TheHumanMind";
 import Ocean from "./pages/Ocean";
-
+import PublicMindProfile from "./pages/PublicMindProfile";
 function Router() {
   return (
     <Switch>
@@ -32,6 +32,7 @@ function Router() {
       <Route path="/chat/:id" component={ChatWithMind} />
       <Route path="/the-human-mind" component={TheHumanMind} />
       <Route path="/ocean" component={Ocean} />
+      <Route path="/mind/:slug" component={PublicMindProfile} />
       <Route path="/404" component={NotFound} />
       <Route component={NotFound} />
     </Switch>

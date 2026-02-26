@@ -36,3 +36,29 @@
 - [x] Add ImportMemories page/modal with text paste + file upload (.txt, .md, .pdf)
 - [x] Add server tRPC procedure: memories.importFromText
 - [x] Update Memories page with "Import" button
+
+## New Features (Round 3)
+- [x] Memory search bar (client-side filter by title/content)
+- [x] Memory category filter chips
+- [x] Weekly memory prompt notification (server-side tRPC mutation)
+- [x] Add slug field to mind_entities table for shareable URLs
+- [x] Add entity.getBySlug tRPC procedure
+- [x] Public /mind/:slug page showing entity profile + chat
+- [x] Share button on MindEntity page (copy link to clipboard)
+- [x] Update App.tsx with /mind/:slug route
+
+## New Features (Round 3 - Full Enhancement)
+- [x] Add slug + shareToken fields to mind_entities schema
+- [x] Push DB migration
+- [x] entity.getBySlug tRPC procedure (public)
+- [x] entity.generateShareLink tRPC procedure
+- [x] memories.search tRPC procedure (server-side search)
+- [x] notifications.sendWeeklyMemoryPrompt tRPC mutation
+- [x] Public /mind/:slug page (entity profile, bio, chat interface)
+- [x] Share button on MindEntity page (copy link + private token link)
+- [x] Memory search bar + category filter chips on Memories page
+- [x] Weekly prompt button on MindEntity page
+- [x] Dashboard: stats row (memories, assessments, conversations, share link)
+- [x] Profile completeness tips (show what's missing)
+- [x] profile.stats tRPC procedure
+- [x] Auto-generate slug/shareToken on synthesis
