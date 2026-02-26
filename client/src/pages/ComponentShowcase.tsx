@@ -1387,16 +1387,10 @@ export default function ComponentsShowcase() {
                     </p>
                   </div>
                   <AIChatBox
-                    api="/api/chat"
+                    messages={[]}
+                    onSendMessage={() => {}}
+                    isLoading={false}
                     placeholder="Try sending a message..."
-                    height="500px"
-                    emptyStateMessage="How can I help you today?"
-                    suggestedPrompts={[
-                      "What's the weather in Tokyo?",
-                      "Calculate 42 * 3.14",
-                      "What is React?",
-                      "Explain TypeScript",
-                    ]}
                   />
                 </div>
               </CardContent>

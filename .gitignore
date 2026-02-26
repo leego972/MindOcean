@@ -105,3 +105,10 @@ temp/
 *.db
 *.sqlite
 *.sqlite3
+
+# Manus internal
+.manus-logs/
+.manus/
+
+# Drizzle meta (keep migrations, ignore generated snapshots)
+drizzle/meta/
