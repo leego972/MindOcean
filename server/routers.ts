@@ -134,6 +134,92 @@ export const appRouter = router({
         await db.deleteMemory(input.id, ctx.user.id);
         return { success: true };
       }),
+
+    // ─── Import from text / document ──────────────────
+    importFromText: protectedProcedure
+      .input(
+        z.object({
+          text: z.string().min(10).max(50000),
+        })
+      )
+      .mutation(async ({ ctx, input }) => {
+        const extractionPrompt = `You are an expert at extracting personal memories and life stories from text.
+
+Analyze the following text and extract distinct memories, stories, or experiences. For each memory:
+- Give it a concise title
+- Preserve the original voice and emotional content
+- Assign the most fitting category
+- Estimate the emotional tone (e.g., "joyful", "bittersweet", "proud", "melancholic", "grateful")
+- Estimate the approximate year if mentioned or inferable
+- Rate importance from 1-10 based on emotional weight and significance
+
+TEXT TO ANALYZE:
+${input.text}
+
+Return a JSON array of memory objects. Each object must have:
+{
+  "title": "short descriptive title",
+  "content": "the memory text, preserving the person's voice",
+  "category": one of: "childhood"|"family"|"career"|"relationship"|"achievement"|"challenge"|"lesson"|"tradition"|"travel"|"friendship"|"loss"|"joy"|"other",
+  "emotionalTone": "descriptive emotional tone",
+  "yearApprox": number or null,
+  "importance": number 1-10
+}
+
+Extract between 1 and 20 memories. If the text is a single cohesive story, split it into meaningful segments. Return ONLY the JSON array, no other text.`;
+
+        const responseText = await invokeLLM(
+          [{ role: "user", content: extractionPrompt }],
+          "You are an expert memory archivist. Extract structured memories from personal text. Respond only with a valid JSON array."
+        );
+
+        // Parse the JSON response
+        let extractedMemories: any[] = [];
+        try {
+          const jsonMatch = responseText.match(/\[[\s\S]*\]/);
+          if (jsonMatch) {
+            extractedMemories = JSON.parse(jsonMatch[0]);
+          }
+        } catch (e) {
+          throw new TRPCError({
+            code: "INTERNAL_SERVER_ERROR",
+            message: "Failed to parse extracted memories from AI response",
+          });
+        }
+
+        if (!Array.isArray(extractedMemories) || extractedMemories.length === 0) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "No memories could be extracted from the provided text",
+          });
+        }
+
+        const validCategories = [
+          "childhood", "family", "career", "relationship", "achievement",
+          "challenge", "lesson", "tradition", "travel", "friendship", "loss", "joy", "other",
+        ] as const;
+
+        // Save all extracted memories
+        const saved: any[] = [];
+        for (const mem of extractedMemories.slice(0, 20)) {
+          if (!mem.content || typeof mem.content !== "string") continue;
+          const category = validCategories.includes(mem.category) ? mem.category : "other";
+          await db.addMemory({
+            userId: ctx.user.id,
+            title: mem.title || null,
+            content: mem.content,
+            category,
+            emotionalTone: mem.emotionalTone || null,
+            yearApprox: typeof mem.yearApprox === "number" ? mem.yearApprox : null,
+            importance: typeof mem.importance === "number"
+              ? Math.min(10, Math.max(1, Math.round(mem.importance)))
+              : 5,
+          });
+          saved.push(mem);
+        }
+
+        return { imported: saved.length, memories: saved };
+      }),
   }),
 
   // ─── Assessments ──────────────────────────────────────
@@ -188,7 +274,6 @@ export const appRouter = router({
         });
       }
 
-      // Build synthesis prompt
       const profileSummary = profile
         ? `
 Name: ${profile.displayName || "Unknown"}
@@ -249,7 +334,6 @@ The entityBio should be 1-2 sentences describing this mind entity for public dis
 
       let synthesisData: any = {};
       try {
-        // Extract JSON from response
         const jsonMatch = responseText.match(/\{[\s\S]*\}/);
         if (jsonMatch) {
           synthesisData = JSON.parse(jsonMatch[0]);
@@ -328,20 +412,17 @@ The entityBio should be 1-2 sentences describing this mind entity for public dis
         const entity = await db.getMindEntityById(conv.entityId);
         if (!entity) throw new TRPCError({ code: "NOT_FOUND", message: "Mind entity not found" });
 
-        // Save user message
         await db.addChatMessage({
           conversationId: input.conversationId,
           role: "user",
           content: input.content,
         });
 
-        // Get conversation history
         const history = await db.getChatMessages(input.conversationId);
         const messages = history
           .filter((m) => m.role !== "system")
           .map((m) => ({ role: m.role as "user" | "assistant", content: m.content }));
 
-        // Generate AI response
         const modeContext =
           conv.mode === "comfort"
             ? "The visitor is seeking emotional comfort. Be warm, empathetic, and supportive."
@@ -356,17 +437,14 @@ The entityBio should be 1-2 sentences describing this mind entity for public dis
           `You are ${entity.entityName || "this person"}. ${entity.personalitySynthesis || ""} Respond authentically as this person.`;
 
         const fullSystemPrompt = `${systemPrompt}\n\nContext: ${modeContext}`;
-
         const aiResponse = await invokeLLM(messages, fullSystemPrompt);
 
-        // Save AI response
         await db.addChatMessage({
           conversationId: input.conversationId,
           role: "assistant",
           content: aiResponse,
         });
 
-        // Increment conversation count
         const db2 = await db.getDb();
         if (db2) {
           const { mindEntities } = await import("../drizzle/schema");
@@ -407,7 +485,6 @@ The entityBio should be 1-2 sentences describing this mind entity for public dis
           };
         }
 
-        // Sample up to 10 minds for performance
         const sampledMinds = collectiveMinds.slice(0, 10);
         const perspectives: any[] = [];
         const votes = { for: 0, against: 0, neutral: 0 };

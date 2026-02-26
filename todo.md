@@ -29,3 +29,10 @@
 ## Tests
 - [x] Vitest tests for calculateCompleteness (from original project)
 - [x] Vitest tests for auth.me and auth.logout
+
+## New Features (Round 2)
+- [x] Add /api/health endpoint for Railway health checks
+- [x] Add memory import from text/document (AI auto-extracts and categorises memories)
+- [x] Add ImportMemories page/modal with text paste + file upload (.txt, .md, .pdf)
+- [x] Add server tRPC procedure: memories.importFromText
+- [x] Update Memories page with "Import" button

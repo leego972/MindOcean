@@ -34,6 +34,11 @@ async function startServer() {
   // Configure body parser with larger size limit for file uploads
   app.use(express.json({ limit: "50mb" }));
   app.use(express.urlencoded({ limit: "50mb", extended: true }));
+  // Health check for Railway and other deployment platforms
+  app.get("/api/health", (_req, res) => {
+    res.json({ status: "ok", timestamp: new Date().toISOString() });
+  });
+
   // OAuth callback under /api/oauth/callback
   registerOAuthRoutes(app);
   // Chat API with streaming and tool calling
