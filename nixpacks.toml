@@ -1,11 +1,14 @@
+# Railway build configuration using Nixpacks
+# Docs: https://nixpacks.com/docs/configuration/file
+
 [phases.setup]
 nixPkgs = ["nodejs_22"]
 
 [phases.install]
-cmds = ["npm install -g pnpm && pnpm install --frozen-lockfile"]
+cmds = ["npm install -g pnpm@10.4.1 && pnpm install --frozen-lockfile"]
 
 [phases.build]
 cmds = ["pnpm build"]
 
 [start]
-cmd = "node migrate.mjs && node dist/index.js"
+cmd = "NODE_ENV=production node migrate.mjs && NODE_ENV=production node dist/index.js"

@@ -110,5 +110,6 @@ temp/
 .manus-logs/
 .manus/
 
-# Drizzle meta (keep migrations, ignore generated snapshots)
-drizzle/meta/
+# Drizzle meta — keep journal (required by migrator at runtime), ignore snapshot files
+drizzle/meta/*.json
+!drizzle/meta/_journal.json
