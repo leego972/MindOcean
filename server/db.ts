@@ -1,4 +1,4 @@
-import { and, desc, eq, like, or } from "drizzle-orm";
+import { and, desc, eq, like, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import {
   Assessment,
@@ -339,4 +339,67 @@ export function calculateCompleteness(
   if (assessmentTypes.includes("cognitive")) score += 10;
   if (assessmentTypes.includes("competency")) score += 10;
   return Math.min(100, score);
+}
+
+export async function getConversationsForOwner(userId: number): Promise<
+  Array<{
+    id: number;
+    entityId: number;
+    entityName: string | null;
+    visitorName: string | null;
+    mode: string | null;
+    messageCount: number;
+    createdAt: Date;
+    updatedAt: Date;
+    lastMessage: string | null;
+  }>
+> {
+  const db = await getDb();
+  if (!db) return [];
+  // Get all entities owned by this user
+  const entities = await db
+    .select({ id: mindEntities.id, entityName: mindEntities.entityName })
+    .from(mindEntities)
+    .where(eq(mindEntities.userId, userId));
+  if (entities.length === 0) return [];
+  const entityIds = entities.map((e) => e.id);
+  const entityMap = new Map(entities.map((e) => [e.id, e.entityName]));
+  // Get all conversations for those entities
+  const convs = await db
+    .select()
+    .from(conversations)
+    .where(
+      entityIds.length === 1
+        ? eq(conversations.entityId, entityIds[0])
+        : sql`${conversations.entityId} IN (${sql.join(entityIds.map((id) => sql`${id}`), sql`, `)})`
+    )
+    .orderBy(desc(conversations.updatedAt));
+  if (convs.length === 0) return [];
+  // Get message counts and last messages per conversation
+  const results = await Promise.all(
+    convs.map(async (conv) => {
+      const msgs = await db
+        .select({ content: chatMessages.content, role: chatMessages.role })
+        .from(chatMessages)
+        .where(eq(chatMessages.conversationId, conv.id))
+        .orderBy(desc(chatMessages.createdAt))
+        .limit(1);
+      const allMsgs = await db
+        .select({ id: chatMessages.id })
+        .from(chatMessages)
+        .where(eq(chatMessages.conversationId, conv.id));
+      return {
+        id: conv.id,
+        entityId: conv.entityId,
+        entityName: entityMap.get(conv.entityId) ?? null,
+        visitorName: conv.visitorName,
+        mode: conv.mode,
+        messageCount: allMsgs.length,
+        createdAt: conv.createdAt,
+        updatedAt: conv.updatedAt,
+        lastMessage: msgs[0]?.content?.slice(0, 120) ?? null,
+      };
+    })
+  );
+  return results;
 }

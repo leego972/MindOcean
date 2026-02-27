@@ -62,3 +62,12 @@
 - [x] Profile completeness tips (show what's missing)
 - [x] profile.stats tRPC procedure
 - [x] Auto-generate slug/shareToken on synthesis
+
+## New Features (Round 4)
+- [ ] Conversation history viewer page (/conversations)
+- [ ] conversations.list tRPC procedure (paginated, with message count)
+- [ ] conversations.getMessages tRPC procedure (full message thread)
+- [ ] Add /conversations route to App.tsx
+- [ ] Add Conversations link to nav
+- [ ] QR code generator in share panel (qrcode.react)
+- [ ] Custom domain setup guide page (/settings/domain or modal)

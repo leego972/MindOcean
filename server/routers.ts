@@ -621,6 +621,25 @@ Format as JSON: { "vote": "for"|"against"|"neutral", "perspective": "your 2-3 se
       }),
   }),
 
+  // ─── Conversations (history viewer) ───────────────────
+  conversations: router({
+    list: protectedProcedure.query(async ({ ctx }) => {
+      return db.getConversationsForOwner(ctx.user.id);
+    }),
+    getMessages: protectedProcedure
+      .input(z.object({ conversationId: z.number() }))
+      .query(async ({ ctx, input }) => {
+        // Verify this conversation belongs to the user's entity
+        const conv = await db.getConversation(input.conversationId);
+        if (!conv) throw new TRPCError({ code: "NOT_FOUND" });
+        const entity = await db.getMindEntityById(conv.entityId);
+        if (!entity || entity.userId !== ctx.user.id) {
+          throw new TRPCError({ code: "FORBIDDEN" });
+        }
+        const messages = await db.getChatMessages(input.conversationId);
+        return { conversation: conv, messages, entity };
+      }),
+  }),
   // ─── Ocean (public browsing) ──────────────────────────
   ocean: router({
     browse: publicProcedure.query(async () => {

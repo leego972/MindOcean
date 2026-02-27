@@ -5,6 +5,8 @@ import { Route, Switch } from "wouter";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { ThemeProvider } from "./contexts/ThemeContext";
 import Home from "./pages/Home";
+import ConversationHistory from "./pages/ConversationHistory";
+import Settings from "./pages/Settings";
 import Dashboard from "./pages/Dashboard";
 import ProfileSetup from "./pages/ProfileSetup";
 import Memories from "./pages/Memories";
@@ -33,6 +35,8 @@ function Router() {
       <Route path="/the-human-mind" component={TheHumanMind} />
       <Route path="/ocean" component={Ocean} />
       <Route path="/mind/:slug" component={PublicMindProfile} />
+      <Route path="/conversations" component={ConversationHistory} />
+      <Route path="/settings" component={Settings} />
       <Route path="/404" component={NotFound} />
       <Route component={NotFound} />
     </Switch>

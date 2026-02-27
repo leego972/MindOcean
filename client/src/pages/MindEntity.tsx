@@ -7,6 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { useLocation } from "wouter";
 import { ArrowLeft, Sparkles, Loader2, MessageCircle, Users, Brain, Share2, Copy, Check, Bell, Globe, Lock, ExternalLink } from "lucide-react";
+import { QRCodeSVG } from "qrcode.react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { Streamdown } from "streamdown";
@@ -187,8 +188,20 @@ export default function MindEntity() {
                           <ExternalLink className="h-4 w-4" />
                         </Button>
                       </div>
+                      {/* QR Code for public link */}
+                      <div className="mt-4 p-4 bg-white rounded-xl inline-flex flex-col items-center gap-2">
+                        <QRCodeSVG
+                          value={`${window.location.origin}/mind/${currentSlug}`}
+                          size={160}
+                          bgColor="#ffffff"
+                          fgColor="#050d1a"
+                          level="M"
+                          includeMargin={false}
+                        />
+                        <p className="text-xs text-gray-500 font-medium">Scan to visit mind profile</p>
+                      </div>
                       <p className="text-xs text-muted-foreground">
-                        Anyone with this link can view your mind profile and start a conversation.
+                        Anyone with this link or QR code can view your mind profile and start a conversation.
                       </p>
                     </div>
                   )}

@@ -7,7 +7,7 @@ import { getLoginUrl } from "@/const";
 import { useLocation } from "wouter";
 import {
   Brain, User, BookOpen, ClipboardCheck, Sparkles, MessageCircle,
-  Users, ChevronRight, ArrowLeft, Waves, Lightbulb, Share2
+  Users, ChevronRight, ArrowLeft, Waves, Lightbulb, Share2, History, Settings
 } from "lucide-react";
 import { useEffect } from "react";
 
@@ -67,6 +67,14 @@ export default function Dashboard() {
                 <MessageCircle className="mr-1 h-4 w-4" /> Talk to My Mind
               </Button>
             )}
+            <Button size="sm" variant="ghost" onClick={() => setLocation("/conversations")} className="text-muted-foreground hover:text-foreground">
+              <History className="h-4 w-4" />
+              <span className="hidden sm:inline ml-1">Conversations</span>
+            </Button>
+            <Button size="sm" variant="ghost" onClick={() => setLocation("/settings")} className="text-muted-foreground hover:text-foreground">
+              <Settings className="h-4 w-4" />
+              <span className="hidden sm:inline ml-1">Settings</span>
+            </Button>
           </div>
         </div>
       </nav>
